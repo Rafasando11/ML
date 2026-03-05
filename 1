@@ -1,0 +1,104 @@
+# ---------------------------------------------------------------------------
+# PROYECTO: Segmentación de Clientes - Mall Customers Dataset
+# OBJETIVO: Implementar K-Means y Clustering Jerárquico para perfilar clientes
+# ---------------------------------------------------------------------------
+
+# 0. Carga de librerías necesarias
+if(!require(tidyverse)) install.packages("tidyverse")
+if(!require(cluster)) install.packages("cluster")
+if(!require(factoextra)) install.packages("factoextra")
+
+library(tidyverse)
+library(cluster)
+library(factoextra)
+
+# 1. Carga del dataset
+# Nota: Asegúrate de que el archivo 'Mall_Customers.csv' esté en tu directorio de trabajo
+df <- read.csv("Mall_Customers.csv")
+head(df)
+
+# 2. Exploración y limpieza de datos (Peso: 30)
+# ---------------------------------------------------------------------------
+dim(df)
+str(df)
+summary(df)
+
+# Renombrar columnas para facilitar manejo
+colnames(df) <- c("CustomerID", "Gender", "Age", "AnnualIncome", "SpendingScore")
+
+# Codificar variable categórica Gender (1: Male, 0: Female)
+df$Gender <- ifelse(df$Gender == "Male", 1, 0)
+
+# Selección de variables para clustering (Ingresos y Gasto) y Normalización
+# Se escalan los datos para que ambas variables tengan media 0 y desviación 1
+df_scaled <- scale(df[, c("AnnualIncome", "SpendingScore")])
+
+# 3. Entrenamiento de modelos de clustering (Peso: 30)
+# ---------------------------------------------------------------------------
+
+# --- MODELO A: K-MEANS ---
+# Método del codo (Elbow Method) para determinar el número óptimo de clusters
+set.seed(123)
+wcss <- sapply(1:10, function(k){kmeans(df_scaled, k, nstart = 20)$tot.withinss})
+
+plot(1:10, wcss, type="b", pch = 19, frame = FALSE, 
+     xlab="Número de Clusters (k)",
+     ylab="Suma de cuadrados internos (WCSS)",
+     main="Método del Codo")
+
+# 
+
+# Según el gráfico, el "codo" se observa en k = 5.
+k_optimal <- 5
+kmeans_model <- kmeans(df_scaled, centers = k_optimal, nstart = 25)
+df$cluster_kmeans <- as.factor(kmeans_model$cluster)
+
+# --- MODELO B: CLUSTERING JERÁRQUICO ---
+dist_matrix <- dist(df_scaled, method = "euclidean")
+hc_model <- hclust(dist_matrix, method = "ward.D")
+
+# Visualización del Dendrograma
+plot(hc_model, main = "Dendrograma de Clientes", xlab = "Clientes", sub = "", labels = FALSE)
+rect.hclust(hc_model, k = 5, border = 2:6)
+
+# 
+
+# Cortar el árbol en 5 clusters
+df$cluster_hc <- as.factor(cutree(hc_model, k = 5))
+
+# 4. Evaluación de modelos (Peso: 20)
+# ---------------------------------------------------------------------------
+# Cálculo de Silueta para K-Means
+sil_km <- silhouette(kmeans_model$cluster, dist_matrix)
+avg_sil_km <- mean(sil_km[, 3])
+
+# Cálculo de Silueta para Jerárquico
+sil_hc <- silhouette(cutree(hc_model, k = 5), dist_matrix)
+avg_sil_hc <- mean(sil_hc[, 3])
+
+cat("Promedio Silueta K-Means:", avg_sil_km, "\n")
+cat("Promedio Silueta Jerárquico:", avg_sil_hc, "\n")
+
+# SELECCIÓN: El modelo con el promedio de silueta más alto es el ganador.
+
+# 5. Interpretación y Visualización (Peso: 20)
+# ---------------------------------------------------------------------------
+
+# Gráfico de dispersión para K-Means (Modelo seleccionado usualmente)
+ggplot(df, aes(x = AnnualIncome, y = SpendingScore, color = cluster_kmeans)) +
+  geom_point(size = 3) +
+  labs(title = "Segmentación de Clientes: K-Means (k=5)",
+       x = "Ingreso Anual (k$)",
+       y = "Puntuación de Gasto (1-100)") +
+  theme_minimal()
+
+# Resumen descriptivo por segmento
+resumen_clusters <- aggregate(df[, 3:5], by=list(Cluster=df$cluster_kmeans), mean)
+print(resumen_clusters)
+
+# --- INTERPRETACIÓN BÁSICA ---
+# Cluster 1: Ingresos bajos - Gasto alto (Jóvenes impulsivos?)
+# Cluster 2: Ingresos altos - Gasto bajo (Ahorradores)
+# Cluster 3: Ingresos medios - Gasto medio (Promedio)
+# Cluster 4: Ingresos altos - Gasto alto (Clientes VIP / Objetivo)
+# Cluster 5: Ingresos bajos - Gasto bajo (Conservadores)
